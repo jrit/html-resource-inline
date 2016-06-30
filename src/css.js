@@ -1,97 +1,107 @@
 "use strict";
 
 var CleanCSS = require( "clean-css" );
-var xtend = require( "xtend" );
-var async = require( "async" );
 var path = require( "path" );
-var constant = require( "lodash.constant" );
-var inline = require( "./util" );
+
+var search = require( "./util/search" );
+var isFunction = require( "./util/isFunction" );
+var isBase64Path = require( "./util/isBase64Path" );
+var isCIDPath = require( "./util/isCIDPath" );
+
+var isRemotePath = require( "./util/isRemotePath" );
+var getFileReplacement = require( "./util/getFileReplacement" );
 
 module.exports = function( options, callback )
 {
-    var settings = xtend( {}, inline.defaults, options );
+    options = require( "./options" )( options );
+    var urlRegex = /url\(\s*["']?\s*([^)'"]+)\s*["']?\s*\);\s*(\/\*[^\*]+\*\/)?/gi;
 
-    var replaceUrl = function( callback )
-    {
-        var args = this;
-
-        if( inline.isBase64Path( args.src ) )
-        {
-            return callback( null ); // Skip
+    function validateAttribute( attr ) {
+        function exp( str ) {
+            return new RegExp( "\\/\\*\\s*" + str + "\\s*\\*\\/", "i" );
         }
+        if ( attr ) {
+            return ( !exp( options.inlineAttribute + "-ignore" ).test( attr ) &&
+                options.images || exp( options.inlineAttribute ).test( attr ) );
+        }
+        return true;
+    }
 
-        inline.getFileReplacement( args.src, settings, function( err, datauriContent )
-        {
-            if( err )
-            {
-                return inline.handleReplaceErr( err, args.src, settings.strict, callback );
-            }
-            if( typeof( args.limit ) === "number" && datauriContent.length > args.limit * 1000 )
-            {
-                return callback( null ); // Skip
-            }
-
-            var css = "url(\"" + datauriContent + "\");";
-            var re = new RegExp( "url\\(\\s?[\"']?(" + inline.escapeSpecialChars( args.src ) + ")[\"']?\\s?\\);", "g" );
-            result = result.replace( re, constant( css ) );
-
-            return callback( null );
+    function replace( src, content ) {
+        var replacement = src.replace( urlRegex, function( match, p1 ) {
+            return match.replace( p1, content );
         } );
-    };
 
-    var rebase = function( src )
-    {
-        var css = "url(\"" + path.join( settings.rebaseRelativeTo, src ).replace( /\\/g, "/" ) + "\");";
-        var re = new RegExp( "url\\(\\s?[\"']?(" + inline.escapeSpecialChars( src ) + ")[\"']?\\s?\\);", "g" );
-        result = result.replace( re, constant( css ) );
-    };
+        return options.fileContent =
+            options.fileContent.replace( src, replacement );
+    }
 
-    var result = settings.fileContent;
-    var tasks = [];
-    var found = null;
-
-    var urlRegex = /url\(\s?["']?([^)'"]+)["']?\s?\);.*/gi;
-
-    if( settings.rebaseRelativeTo )
-    {
-        var matches = {};
-        while( ( found = urlRegex.exec( result ) ) !== null )
-        {
-            var src = found[ 1 ];
-            matches[ src ] = true;
+    var promise = new Promise( function( resolve, reject ) {
+        if ( !options.fileContent ) {
+            return reject( new Error( "No file content" ) );
         }
 
-        for( var src in matches )
-        {
-            if( !inline.isRemotePath( src ) && !inline.isBase64Path( src ) )
-            {
-                rebase( src );
+        return resolve(
+            search( urlRegex, options.fileContent
+        ).reduce( function( result, src ) {
+            if ( !validateAttribute( src[2] ) ||
+                isBase64Path( src[1] ) ||
+                isCIDPath( src[1] ) ) {
+                return result;
             }
-        }
-    }
 
-    var inlineAttributeCommentRegex = new RegExp( "\\/\\*\\s?" + settings.inlineAttribute + "\\s?\\*\\/", "i" );
-    var inlineAttributeIgnoreCommentRegex = new RegExp( "\\/\\*\\s?" + settings.inlineAttribute + "-ignore\\s?\\*\\/", "i" );
+            if ( !result[ src[1] ] ) {
+                result[ src[1] ] = [ src[0] ];
+            } else {
+                result[ src[1] ].push( src[0] );
+            }
+            return result;
+        }, {} ) );
+    } ).then( function( matches ) {
+        return Promise.all( Object.keys( matches ).map( function( src ) {
+            return new Promise( function( resolve, reject ) {
+                var origin = src;
+                if ( !isRemotePath( src ) && options.rebaseRelativeTo ) {
+                    origin = path.join( options.rebaseRelativeTo, src ).replace( /\\/g, "/" );
+                }
 
-    while( ( found = urlRegex.exec( result ) ) !== null )
-    {
-        if( !inlineAttributeIgnoreCommentRegex.test( found[ 0 ] ) &&
-            ( settings.images || inlineAttributeCommentRegex.test( found[ 0 ] ) ) )
-        {
-            tasks.push( replaceUrl.bind(
-            {
-                src: found[ 1 ],
-                limit: settings.images
-            } ) );
-        }
-    }
+                // Replace source
+                return getFileReplacement( origin, options, function( err, content ) {
+                    if ( err ) {
+                        if ( options.strict ) {
+                            return reject( err );
+                        } else {
+                            console.warn( "Not found, skipping: " + src  );
+                            return resolve(); // Skip
+                        }
+                    }
+                    resolve( content );
+                } );
+            } ).then( function( content ) {
+                if ( !content || typeof( options.images ) === "number" &&
+                    content.length > options.images * 1000 ) {
+                    return; // Skip
+                }
 
-    async.parallel( tasks, function( err )
-    {
-        if( !err )
-        {
-            result = settings.cssmin ? CleanCSS.process( result ) : result;
+                return Promise.all( matches[src].map( function( src ) {
+                    return replace( src, content );
+                } ) );
+            } );
+        } ) );
+    } ).then( function() {
+        options.fileContent = options.cssmin ? CleanCSS.process( options.fileContent ) : options.fileContent;
+        if ( isFunction( callback ) ) {
+            callback( null, options.fileContent );
         }
-        callback( err, result );
+        return options.fileContent;
+    } ).catch( function( err ) {
+        if ( isFunction( callback ) ) {
+            callback( err );
+        }
+        return Promise.reject( err );
     } );
+
+    if ( !isFunction( callback ) ) {
+        return promise;
+    }
 };

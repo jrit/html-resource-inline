@@ -3,10 +3,24 @@
 var assert = require( "assert" );
 var fs = require( "fs" );
 var path = require( "path" );
-var inline = require( "../src/inline.js" );
-var util = require( "../src/util.js" );
 var fauxJax = require( "faux-jax" );
 var mime = require( "mime-types" );
+
+var inline = require( "../src/inline.js" );
+
+/**
+ * Escape special regex characters of a particular string
+ *
+ * @example
+ * "http://www.test.com" --> "http:\/\/www\.test\.com"
+ *
+ * @param  {String} str - string to escape
+ * @return {String} string with special characters escaped
+ */
+var escapeSpecialChars = function( str ) {
+    return str.replace( /(\/|\.|\$|\^|\{|\[|\(|\||\)|\*|\+|\?|\\)/g, "\\$1" );
+};
+
 
 function normalize( contents )
 {
@@ -20,7 +34,7 @@ function readFile( file )
 
 function diff( actual, expected )
 {
-    if( actual === expected )
+    if( !actual || !expected || ( actual === expected ) )
     {
         return;
     }
@@ -280,6 +294,22 @@ describe( "html", function()
                     fileContent: readFile( "test/cases/img-too-large.html" ),
                     relativeTo: "test/cases/",
                     images: 0.1
+                },
+                function( err, result )
+                {
+                    testEquality( err, result, expected, done );
+                }
+            );
+        } );
+
+        it( "should support srcset", function( done )
+        {
+            var expected = readFile( "test/cases/img-srcset_out.html" );
+
+            inline.html( {
+                    fileContent: readFile( "test/cases/img-srcset.html" ),
+                    relativeTo: "test/cases/",
+                    images: true
                 },
                 function( err, result )
                 {
@@ -592,7 +622,7 @@ describe( "util", function()
             var str = "http://fonts.googleapis.com/css?family=Open+Sans";
             var expected = "http:\\/\\/fonts\\.googleapis\\.com\\/css\\?family=Open\\+Sans";
 
-            var result = util.escapeSpecialChars( str );
+            var result = escapeSpecialChars( str );
             var regex = new RegExp( result, "g" );
 
             assert.equal( result, expected );
