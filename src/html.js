@@ -1,6 +1,7 @@
 "use strict";
 
 var path = require( "path" );
+var url = require( "url" );
 var unescape = require( "lodash.unescape" );
 var xtend = require( "xtend" );
 var parallel = require( "async" ).parallel;
@@ -84,9 +85,28 @@ module.exports = function( options, callback )
                     return callback( null );
                 }
 
+                // if the source is a remote path, we can rebase directly to its root
+                // this ensures that stylesheets on external domains can also be resolved to
+                var rebaseRelativeTo = settings.rebaseRelativeTo;
+                if (!rebaseRelativeTo)
+                {
+                    if ( inline.isRemotePath( args.src ) )
+                    {
+                        rebaseRelativeTo = path.dirname( args.src ) + "/";
+                    }
+                    else
+                    {
+                        var absSrc = url.resolve( settings.relativeTo, args.src );
+                        rebaseRelativeTo = path.relative(
+                            settings.relativeTo,
+                            path.dirname( absSrc ) + "/"
+                        );
+                    }
+                }
+
                 var cssOptions = xtend( {}, settings, {
                     fileContent: content.toString(),
-                    rebaseRelativeTo: path.relative( settings.relativeTo, settings.rebaseRelativeTo || path.join( settings.relativeTo, args.src, ".." + path.sep ) )
+                    rebaseRelativeTo: rebaseRelativeTo
                 } );
 
                 css( cssOptions, function( err, content )

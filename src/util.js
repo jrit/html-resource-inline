@@ -7,6 +7,7 @@ var fs = require( "fs" );
 var request = require( "request" );
 var chalk = require( "chalk" );
 var validDataUrl = require( "valid-data-url" );
+var encodeUrl = require( "encodeurl" );
 
 var util = {};
 
@@ -85,6 +86,8 @@ function getRemote( uri, settings, callback, toDataUri )
         uri = "https:" + uri;
     }
 
+    uri = encodeUrl(uri)
+
     var requestOptions = {
         uri: uri,
         encoding: toDataUri && "binary",
@@ -144,13 +147,13 @@ util.getInlineFileContents = function( src, relativeTo )
 
 util.getTextReplacement = function( src, settings, callback )
 {
-    if( util.isRemotePath( settings.relativeTo ) || util.isRemotePath( src ) )
-    {
-        getRemote( url.resolve( settings.relativeTo, src ), settings, callback );
-    }
-    else if( util.isRemotePath( src ) )
+    if( util.isRemotePath( src ) )
     {
         getRemote( src, settings, callback );
+    }
+    else if( util.isRemotePath( settings.relativeTo ) )
+    {
+        getRemote( url.resolve( settings.relativeTo, src ), settings, callback );
     }
     else
     {
@@ -172,17 +175,17 @@ util.getFileReplacement = function( src, settings, callback )
     {
         callback( null );
     }
-    else if( util.isRemotePath( settings.relativeTo ) )
+    else if( validDataUrl( src ) )
     {
-        getRemote( url.resolve( settings.relativeTo, src ), settings, callback, true );
+        callback( null, src );
     }
     else if( util.isRemotePath( src ) )
     {
         getRemote( src, settings, callback, true );
     }
-    else if( validDataUrl( src ) )
+    else if( util.isRemotePath( settings.relativeTo ) )
     {
-        callback( null, src );
+        getRemote( url.resolve( settings.relativeTo, src ), settings, callback, true );
     }
     else
     {
@@ -204,6 +207,7 @@ util.handleReplaceErr = function( err, src, strict, callback )
     }
     else
     {
+        console.error( err );
         console.warn( chalk.yellow( "Not found, skipping: " + src ) );
         return callback( null );
     }

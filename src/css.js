@@ -3,6 +3,7 @@
 var xtend = require( "xtend" );
 var parallel = require( "async" ).parallel;
 var path = require( "path" );
+var url = require( "url" );
 var inline = require( "./util" );
 
 module.exports = function( options, callback )
@@ -39,7 +40,16 @@ module.exports = function( options, callback )
 
     var rebase = function( src )
     {
-        var css = "url(\"" + path.join( settings.rebaseRelativeTo, src ).replace( /\\/g, "/" ) + "\")";
+        var resolved;
+        if ( inline.isRemotePath( settings.rebaseRelativeTo ) )
+        {
+            resolved = url.resolve( settings.rebaseRelativeTo, src );
+        }
+        else
+        {
+            resolved = src.charAt(0) === '/' ? src : path.join( settings.rebaseRelativeTo, src );
+        }
+        var css = "url(\"" + resolved.replace( /\\/g, "/" ) + "\")";
         var re = new RegExp( "url\\(\\s?[\"']?(" + inline.escapeSpecialChars( src ) + ")[\"']?\\s?\\)", "g" );
         result = result.replace( re, () => css );
     };
@@ -58,7 +68,7 @@ module.exports = function( options, callback )
 
         while( ( found = urlRegex.exec( result.substring(index) ) ) !== null )
         {
-            src = found[ 1 ];
+            src = found[ 1 ].trim();
             matches[ src ] = true;
             index = found.index + index + 1;
         }
