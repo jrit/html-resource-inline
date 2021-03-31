@@ -320,6 +320,22 @@ describe( "html", function()
                 }
             );
         } );
+
+        it( "should inline images in inline css", function( done )
+        {
+            var expected = readFile( "test/cases/html-inline-css_out.html" )
+
+            inline.html( {
+                    fileContent: readFile( "test/cases/html-inline-css.html" ),
+                    relativeTo: "test/cases",
+                    images: true
+                },
+                function( err, result )
+                {
+                    testEquality( err, result, expected, done );
+                }
+            );
+        } );
     } );
 
     describe( "svgs", function()
